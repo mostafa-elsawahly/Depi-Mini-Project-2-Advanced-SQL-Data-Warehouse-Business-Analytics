@@ -67,45 +67,57 @@ CREATE TABLE bronze.superstore_raw (
 );
 
 -- ==============================================================================
--- Bulk Insert into Bronze Layer
+-- Stored Procedure: Load Bronze Layer (Source -> Bronze)
 -- ==============================================================================
--- 1. FIRSTROW = 2: Skips the header row.
--- 2. FIELDTERMINATOR = ';': Sets the semicolon as the column delimiter.
--- 3. TABLOCK: Locks the entire table to speed up the insert and reduce resource usage.
--- 4. CODEPAGE = '65001': Uses UTF-8 encoding to ensure text and symbols are read correctly.
--- ==============================================================================
-EXEC bronze.load_bronze
 GO
-CREATE OR ALTER PROCEDURE bronze.load_bronze AS 
+CREATE OR ALTER PROCEDURE bronze.load_bronze AS
 BEGIN
-BEGIN TRY
-PRINT '==============================================';
-PRINT 'Loading data into Bronze Layer (Raw Data Stage)';
-PRINT '==============================================';
-PRINT '----------------------------------------------';
-PRINT ' Loading data from CSV file into superstore table';
-PRINT '----------------------------------------------';
-PRINT '>> TRUNCATING TABLE bronze.superstore_raw';
-TRUNCATE TABLE bronze.superstore_raw;
-PRINT '>> INSERTING data into bronze.superstore_raw';
-BULK INSERT bronze.superstore_raw
-FROM "C:\Users\Mostafa\Desktop\Central_Superstore.csv"
-WITH (
-    FIRSTROW = 2,
-    FIELDTERMINATOR = ';',
-    TABLOCK,
-    CODEPAGE = '65001'
-);
-END TRY
-BEGIN CATCH
-PRINT '==============================================';
-PRINT 'Error occurred while loading data into Bronze Layer';
-PRINT '==============================================';
-END CATCH
+    DECLARE @start_time DATETIME, @end_time DATETIME, @batch_start_time DATETIME, @batch_end_time DATETIME; 
+    BEGIN TRY
+        SET @batch_start_time = GETDATE();
+        PRINT '================================================';
+        PRINT 'Loading Bronze Layer (Central Superstore)';
+        PRINT '================================================';
+
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: bronze.superstore_raw';
+        TRUNCATE TABLE bronze.superstore_raw;
+        
+        PRINT '>> Inserting Data Into: bronze.superstore_raw';
+        BULK INSERT bronze.superstore_raw
+        FROM 'C:\Users\Mostafa\Desktop\Central_Superstore.csv'
+        WITH (
+            FIRSTROW = 2,
+            FIELDTERMINATOR = ';',
+            TABLOCK,
+            CODEPAGE = '65001'
+        );
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(second, @start_time, @end_time) AS NVARCHAR) + ' seconds';
+        PRINT '>> -------------';
+
+        SET @batch_end_time = GETDATE();
+        PRINT '==========================================';
+        PRINT 'Loading Bronze Layer is Completed';
+        PRINT '   - Total Load Duration: ' + CAST(DATEDIFF(SECOND, @batch_start_time, @batch_end_time) AS NVARCHAR) + ' seconds';
+        PRINT '==========================================';
+    END TRY
+    BEGIN CATCH
+        PRINT '==========================================';
+        PRINT 'ERROR OCCURRED DURING LOADING BRONZE LAYER';
+        PRINT 'Error Message: ' + ERROR_MESSAGE();
+        PRINT 'Error Number: ' + CAST (ERROR_NUMBER() AS NVARCHAR);
+        PRINT 'Error State: ' + CAST (ERROR_STATE() AS NVARCHAR);
+        PRINT '==========================================';
+    END CATCH
 END
---TEST: Verify that the data has been loaded correctly into the Bronze layer.
+GO
 
-SELECT * FROM bronze.superstore_raw;
-SELECT COUNT(*) FROM bronze.superstore_raw;
+-- ==============================================================================
+-- TEST: Execute the procedure to load data
+-- ==============================================================================
 EXEC bronze.load_bronze;
+GO
 
+--===============================================================================
+--===============================================================================
