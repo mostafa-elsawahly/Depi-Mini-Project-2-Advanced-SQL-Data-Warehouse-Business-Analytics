@@ -42,8 +42,8 @@ CREATE SCHEMA gold;
 GO
 IF OBJECT_ID('bronze.superstore_raw', 'U') IS NOT NULL
 DROP TABLE bronze.superstore_raw;
-CREATE TABLE bronze.superstore_raw (
-    [Row ID] NVARCHAR(MAX),
+    CREATE TABLE bronze.superstore_raw (
+[Row ID] NVARCHAR(MAX),
     [Order ID] NVARCHAR(MAX),
     [Order Date] NVARCHAR(MAX),
     [Ship Date] NVARCHAR(MAX),
@@ -65,7 +65,7 @@ CREATE TABLE bronze.superstore_raw (
     [Discount] NVARCHAR(MAX),
     [Profit] NVARCHAR(MAX)
 );
-
+GO
 -- ==============================================================================
 -- Stored Procedure: Load Bronze Layer (Source -> Bronze)
 -- ==============================================================================
@@ -121,3 +121,122 @@ GO
 
 --===============================================================================
 --===============================================================================
+SELECT * 
+FROM bronze.superstore_raw;
+
+--===============================================================================
+--===============================================================================
+-- ==============================================================================
+-- 2. DDL Script: Create Silver Table for Superstore (With Audit Column)
+-- ==============================================================================
+IF OBJECT_ID('silver.superstore_cleaned', 'U') IS NOT NULL
+    DROP TABLE silver.superstore_cleaned;
+GO
+
+CREATE TABLE silver.superstore_cleaned (
+    [Order ID] NVARCHAR(50),
+    [Order Date] DATE,
+    [Ship Date] DATE,
+    [Ship Mode] NVARCHAR(50),
+    [Customer ID] NVARCHAR(50),
+    [Customer Name] NVARCHAR(100),
+    [Segment] NVARCHAR(50),
+    [Country] NVARCHAR(50),
+    [City] NVARCHAR(50),
+    [State] NVARCHAR(50),
+    [Region] NVARCHAR(50),
+    [Product ID] NVARCHAR(50),
+    [Category] NVARCHAR(50),
+    [Sub-Category] NVARCHAR(50),
+    [Sales] DECIMAL(18, 4),
+    [Quantity] INT,
+    [Discount] DECIMAL(5, 2),
+    [Profit] DECIMAL(18, 4),
+    dwh_create_date DATETIME2 DEFAULT GETDATE() 
+);
+GO
+-- ==============================================================================
+-- 3. Stored Procedure: Load Silver Layer (Bronze -> Silver)
+-- ==============================================================================
+CREATE OR ALTER PROCEDURE silver.load_silver AS
+BEGIN
+    DECLARE @start_time DATETIME, @end_time DATETIME, @batch_start_time DATETIME, @batch_end_time DATETIME; 
+    BEGIN TRY
+        SET @batch_start_time = GETDATE();
+        PRINT '================================================';
+        PRINT 'Loading Silver Layer (Central Superstore)';
+        PRINT '================================================';
+
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.superstore_cleaned';
+        TRUNCATE TABLE silver.superstore_cleaned;
+        
+        PRINT '>> Inserting Data Into: silver.superstore_cleaned';
+        INSERT INTO silver.superstore_cleaned (
+            [Order ID], [Order Date], [Ship Date], [Ship Mode],
+            [Customer ID], [Customer Name], [Segment], [Country], [City], [State],
+            [Region], [Product ID], [Category], [Sub-Category],
+            [Sales], [Quantity], [Discount], [Profit]
+        )
+        SELECT 
+            TRIM([Order ID]),
+            TRY_CONVERT(DATE, [Order Date], 103), 
+            TRY_CONVERT(DATE, [Ship Date], 103),
+            TRIM([Ship Mode]),
+            TRIM([Customer ID]),
+            TRIM([Customer Name]),
+            TRIM([Segment]),
+            TRIM([Country]),
+            TRIM([City]),
+            TRIM([State]),
+            TRIM([Region]),
+            TRIM([Product ID]),
+            TRIM([Category]),
+            TRIM([Sub-Category]),
+            TRY_CAST(REPLACE([Sales], ',', '.') AS DECIMAL(18, 4)),
+            TRY_CAST([Quantity] AS INT),
+            TRY_CAST(REPLACE([Discount], ',', '.') AS DECIMAL(5, 2)),
+            TRY_CAST(REPLACE([Profit], ',', '.') AS DECIMAL(18, 4))
+        FROM bronze.superstore_raw;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(second, @start_time, @end_time) AS NVARCHAR) + ' seconds';
+        PRINT '>> -------------';
+
+        SET @batch_end_time = GETDATE();
+        PRINT '==========================================';
+        PRINT 'Loading Silver Layer is Completed';
+        PRINT '   - Total Load Duration: ' + CAST(DATEDIFF(SECOND, @batch_start_time, @batch_end_time) AS NVARCHAR) + ' seconds';
+        PRINT '==========================================';
+    END TRY
+    BEGIN CATCH
+        PRINT '==========================================';
+        PRINT 'ERROR OCCURRED DURING LOADING SILVER LAYER';
+        PRINT 'Error Message: ' + ERROR_MESSAGE();
+        PRINT 'Error Number: ' + CAST (ERROR_NUMBER() AS NVARCHAR);
+        PRINT 'Error State: ' + CAST (ERROR_STATE() AS NVARCHAR);
+        PRINT '==========================================';
+    END CATCH
+END
+GO
+
+EXEC silver.load_silver;
+SELECT TOP 100 * FROM silver.superstore_cleaned;
+
+--CHECK FORNULL OR DUPLICATE VALUES IN PRIMARY KEY 
+--EXPECTATION: NO RESULTS
+SELECT * 
+FROM bronze.superstore_raw
+WHERE [Order ID] IS NULL 
+   OR [Product ID] IS NULL 
+   OR [Customer ID] IS NULL;
+
+SELECT 
+    [Order ID], 
+    [Product ID], 
+    COUNT(*) AS Duplicate_Count
+FROM bronze.superstore_raw
+GROUP BY 
+    [Order ID], 
+    [Product ID]
+HAVING COUNT(*) > 1;
