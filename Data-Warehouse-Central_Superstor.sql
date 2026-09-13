@@ -367,7 +367,23 @@ FROM (
     FROM silver.superstore_cleaned
 ) AS t;
 GO
+-- =============================================================================
+-- Create Dimension: gold.dim_date
+-- =============================================================================
+IF OBJECT_ID('gold.dim_date', 'V') IS NOT NULL
+    DROP VIEW gold.dim_date;
+GO
 
+CREATE VIEW gold.dim_date AS
+SELECT DISTINCT
+    [Order Date] AS date_key,
+    YEAR([Order Date]) AS order_year,
+    MONTH([Order Date]) AS order_month,
+    DATENAME(MONTH, [Order Date]) AS order_month_name,
+    DATEPART(QUARTER, [Order Date]) AS order_quarter
+FROM silver.superstore_cleaned
+WHERE [Order Date] IS NOT NULL;
+GO
 -- =============================================================================
 -- Create Fact Table: gold.fact_sales
 -- =============================================================================
