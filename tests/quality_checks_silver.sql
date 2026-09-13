@@ -63,3 +63,5 @@ WHERE [Customer Name] LIKE ' %' OR [Customer Name] LIKE '% '
    OR [Customer ID] LIKE ' %' OR [Customer ID] LIKE '% '
    OR [Product ID] LIKE ' %' OR [Product ID] LIKE '% '
    OR [Category] LIKE ' %' OR [Category] LIKE '% ';
+--================================================================================
+--================================================================================
