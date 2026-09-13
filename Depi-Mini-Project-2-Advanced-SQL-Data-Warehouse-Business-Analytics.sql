@@ -240,3 +240,215 @@ GROUP BY
     [Order ID], 
     [Product ID]
 HAVING COUNT(*) > 1;
+-- ====================================================================
+-- 1. Check for NULLs or Blanks in Core IDs
+-- ====================================================================
+SELECT 
+    COUNT(CASE WHEN [Order ID] IS NULL OR [Order ID] = '' THEN 1 END) AS null_order_ids,
+    COUNT(CASE WHEN [Customer ID] IS NULL OR [Customer ID] = '' THEN 1 END) AS null_customer_ids,
+    COUNT(CASE WHEN [Product ID] IS NULL OR [Product ID] = '' THEN 1 END) AS null_product_ids
+FROM silver.superstore_cleaned;
+
+-- ====================================================================
+-- 2. Check for Date Logic (Ship Date before Order Date is invalid)
+-- ====================================================================
+SELECT 
+    [Order ID], 
+    [Order Date], 
+    [Ship Date]
+FROM silver.superstore_cleaned
+WHERE [Ship Date] < [Order Date];
+
+-- ====================================================================
+-- 3. Check for Invalid Numeric Values (Sales/Quantity shouldn't be <= 0)
+-- ====================================================================
+SELECT 
+    [Order ID], 
+    [Product ID], 
+    [Sales], 
+    [Quantity]
+FROM silver.superstore_cleaned
+WHERE [Sales] <= 0 OR [Quantity] <= 0;
+
+-- ====================================================================
+-- 4. Check for Potential Duplicates at the Line Item Level
+-- (An order typically shouldn't have the exact same product twice unless split)
+-- ====================================================================
+SELECT 
+    [Order ID], 
+    [Product ID], 
+    COUNT(*) AS duplicate_count
+FROM silver.superstore_cleaned
+GROUP BY [Order ID], [Product ID]
+HAVING COUNT(*) > 1;
+
+-- ====================================================================
+-- 5. Check for Unwanted Spaces in Text Columns (Ensuring TRIM worked)
+-- ====================================================================
+SELECT 
+    [Customer ID], 
+    [Customer Name],
+    [Product ID],
+    [Category]
+FROM silver.superstore_cleaned
+WHERE [Customer Name] LIKE ' %' OR [Customer Name] LIKE '% '
+   OR [Customer ID] LIKE ' %' OR [Customer ID] LIKE '% '
+   OR [Product ID] LIKE ' %' OR [Product ID] LIKE '% '
+   OR [Category] LIKE ' %' OR [Category] LIKE '% ';
+--==================================================================================
+--==================================================================================
+--==================================================================================
+-- =============================================================================
+-- Create Dimension: gold.dim_customers
+-- =============================================================================
+IF OBJECT_ID('gold.dim_customers', 'V') IS NOT NULL
+    DROP VIEW gold.dim_customers;
+GO
+
+CREATE VIEW gold.dim_customers AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY [Customer ID]) AS customer_key, -- Surrogate key
+    [Customer ID] AS customer_id,
+    [Customer Name] AS customer_name,
+    [Segment] AS segment
+FROM (
+    SELECT DISTINCT
+        [Customer ID],
+        [Customer Name],
+        [Segment]
+    FROM silver.superstore_cleaned
+    WHERE [Customer ID] IS NOT NULL
+) AS t;
+GO
+
+-- =============================================================================
+-- Create Dimension: gold.dim_products
+-- =============================================================================
+IF OBJECT_ID('gold.dim_products', 'V') IS NOT NULL
+    DROP VIEW gold.dim_products;
+GO
+
+CREATE VIEW gold.dim_products AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY [Product ID]) AS product_key, -- Surrogate key
+    [Product ID] AS product_id,
+    [Category] AS category,
+    [Sub-Category] AS sub_category
+FROM (
+    SELECT DISTINCT
+        [Product ID],
+        [Category],
+        [Sub-Category]
+    FROM silver.superstore_cleaned
+    WHERE [Product ID] IS NOT NULL
+) AS t;
+GO
+
+-- =============================================================================
+-- Create Dimension: gold.dim_location
+-- =============================================================================
+IF OBJECT_ID('gold.dim_location', 'V') IS NOT NULL
+    DROP VIEW gold.dim_location;
+GO
+
+CREATE VIEW gold.dim_location AS
+SELECT
+    ROW_NUMBER() OVER (ORDER BY [Country], [State], [City]) AS location_key, -- Surrogate key
+    [Country] AS country,
+    [Region] AS region,
+    [State] AS state,
+    [City] AS city
+FROM (
+    SELECT DISTINCT
+        [Country],
+        [Region],
+        [State],
+        [City]
+    FROM silver.superstore_cleaned
+) AS t;
+GO
+
+-- =============================================================================
+-- Create Fact Table: gold.fact_sales
+-- =============================================================================
+IF OBJECT_ID('gold.fact_sales', 'V') IS NOT NULL
+    DROP VIEW gold.fact_sales;
+GO
+
+CREATE VIEW gold.fact_sales AS
+SELECT
+    sd.[Order ID] AS order_id,
+    cu.customer_key,
+    pr.product_key,
+    loc.location_key,
+    sd.[Order Date] AS order_date,
+    sd.[Ship Date] AS ship_date,
+    sd.[Ship Mode] AS ship_mode,
+    sd.[Sales] AS sales_amount,
+    sd.[Quantity] AS quantity,
+    sd.[Discount] AS discount,
+    sd.[Profit] AS profit
+FROM silver.superstore_cleaned sd
+LEFT JOIN gold.dim_customers cu
+    ON sd.[Customer ID] = cu.customer_id
+LEFT JOIN gold.dim_products pr
+    ON sd.[Product ID] = pr.product_id
+LEFT JOIN gold.dim_location loc
+    ON sd.[Country] = loc.country
+   AND sd.[State] = loc.state
+   AND sd.[City] = loc.city;
+GO
+SELECT TOP 10 * FROM gold.fact_sales;
+-- ====================================================================
+-- 1. Checking Dimensions for Duplicate or NULL Surrogate Keys
+-- ====================================================================
+
+-- Check 'gold.dim_customers'
+SELECT 
+    customer_key,
+    COUNT(*) AS duplicate_count
+FROM gold.dim_customers
+GROUP BY customer_key
+HAVING COUNT(*) > 1 OR customer_key IS NULL;
+
+-- Check 'gold.dim_products'
+SELECT 
+    product_key,
+    COUNT(*) AS duplicate_count
+FROM gold.dim_products
+GROUP BY product_key
+HAVING COUNT(*) > 1 OR product_key IS NULL;
+
+-- Check 'gold.dim_location'
+SELECT 
+    location_key,
+    COUNT(*) AS duplicate_count
+FROM gold.dim_location
+GROUP BY location_key
+HAVING COUNT(*) > 1 OR location_key IS NULL;
+
+
+-- ====================================================================
+-- 2. Checking Fact Table for Referential Integrity (Foreign Keys)
+-- ====================================================================
+
+-- Ensure all customer_keys in fact_sales exist in dim_customers
+SELECT f.order_id, f.customer_key 
+FROM gold.fact_sales f
+LEFT JOIN gold.dim_customers c
+    ON f.customer_key = c.customer_key
+WHERE c.customer_key IS NULL;
+
+-- Ensure all product_keys in fact_sales exist in dim_products
+SELECT f.order_id, f.product_key 
+FROM gold.fact_sales f
+LEFT JOIN gold.dim_products p
+    ON f.product_key = p.product_key
+WHERE p.product_key IS NULL;
+
+-- Ensure all location_keys in fact_sales exist in dim_location
+SELECT f.order_id, f.location_key 
+FROM gold.fact_sales f
+LEFT JOIN gold.dim_location l
+    ON f.location_key = l.location_key
+WHERE l.location_key IS NULL;
