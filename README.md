@@ -71,3 +71,4 @@ The business intelligence queries developed in this project focus on three core 
 * `data/` - Contains the source dataset (`Central_Superstore.csv`).
 * `sql_scripts/` - DDL and DML scripts (Schema creation, Views, Stored Procedures, and Analytical Queries).
 * `docs/` - Additional documentation or grading rubrics.
+* Clone Repo : [github.com/mostafa-elsawahly/Depi-Mini-Project-2-Advanced-SQL-Data-Warehouse-Business-Analytics](https://github.com/mostafa-elsawahly/Depi-Mini-Project-2-Advanced-SQL-Data-Warehouse-Business-Analytics)
